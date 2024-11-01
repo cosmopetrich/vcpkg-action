@@ -1,0 +1,102 @@
+name: Tests
+on:
+  pull_request:
+    paths-ignore:
+      - LICENSE
+      - "*.md"
+  push:
+    branches:
+      - "v*"
+    paths-ignore:
+      - LICENSE
+      - "*.md"
+  workflow_dispatch:
+
+concurrency:
+  # Cancel in-progress tests on a new push to the same branch/PR
+  # https://stackoverflow.com/questions/70928424/limit-github-action-workflow-concurrency-on-push-and-pull-request
+  group: ${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  generic:
+    name: Generic
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            triplet: x64-linux
+          - os: windows-2022
+            triplet: x64-windows
+          # The version below is pre-installed in windows-2022 as of 2024-11
+          - vcpkg-platform-toolset-version: "14.41.34120"
+            os: windows-2022
+            triplet: x64-windows-static
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run action
+        id: vcpkg
+        uses: ./
+        with:
+          output-directory: test-output
+          overlay-ports-directory: ${{ matrix.overlay-ports-directoy }}
+          msvc-component-version: ${{ matrix.msvc-component-version }}
+          triplet: ${{ matrix.triplet }}
+          vcpkg-manifest: .test/vcpkg.json
+          vcpkg-platform-toolset-version: ${{ matrix.vcpkg-platform-toolset-version }}
+      - name: Ensure that installed packages are in the correct place
+        run: |
+          ls
+          echo "---"
+          ls test-output
+          echo "---"
+          ls test-output/include
+          echo "---"
+          ls test-output/include/boost
+      - name: Check baseline
+        shell: bash
+        run: |
+          echo "baseline: ${{ steps.vcpkg.outputs.baseline }}"
+          [ "${{ steps.vcpkg.outputs.baseline }}" = "bb1ca2757bca8f8e372a4deb35943828e3b0d155" ]
+          echo "baseline OK"
+      - name: Check baseline-short
+        shell: bash
+        run: |
+          echo "baseline-short: ${{ steps.vcpkg.outputs.baseline-short }}"
+          grep -qE '^[a-f0-9]{7,}' <<< "${{ steps.vcpkg.outputs.baseline-short }}"
+          echo "baseline-short format OK"
+          grep -qE '^${{ steps.vcpkg.outputs.baseline-short }}' <<< "${{ steps.vcpkg.outputs.baseline }}"
+      - name: Check compiler-id
+        shell: bash
+        run: |
+          echo "compiler-id: ${{ steps.vcpkg.outputs.compiler-id }}"
+          grep -qE '^(GNU|MSVC)$' <<< "${{ steps.vcpkg.outputs.compiler-id }}"
+      - name: Check compiler-version
+        shell: bash
+        run: |
+          echo "compiler-version: ${{ steps.vcpkg.outputs.compiler-version }}"
+          grep -qE '^[0-9.]+$' <<< "${{ steps.vcpkg.outputs.compiler-version }}"
+      - name: Check toolset-version
+        shell: bash
+        run: |
+          echo "toolset-version: ${{ steps.vcpkg.outputs.toolset-version }}"
+          if [ -n "${{ matrix.vcpkg-platform-toolset-version }}" ]; then
+            echo "(expecting ${{ matrix.vcpkg-platform-toolset-version }})"
+            [ "${{ steps.vcpkg.outputs.toolset-version }}" = "${{ matrix.vcpkg-platform-toolset-version }}" ] 
+          else
+            echo "(expecting any version number)"
+            grep -qE '^[0-9.]+$' <<< "${{ steps.vcpkg.outputs.toolset-version }}" 
+          fi
+      - name: Check installed-versions
+        shell: bash
+        run: |
+          INSTALLED_VERSIONS="$(echo '${{ steps.vcpkg.outputs.installed-versions }}' | xargs)"
+          echo $INSTALLED_VERSIONS
+          EXPECTED_VERSIONS='${{ matrix.expected-versions || 'boost-assert 1.86.0 boost-cmake 1.86.0 boost-config 1.86.0 boost-headers 1.86.0 boost-uninstall 1.86.0' }}'
+          echo $EXPECTED_VERSIONS
+          echo "installed-versions: ${INSTALLED_VERSIONS}"
+          echo "(expecting ${EXPECTED_VERSIONS})"
+          [ "${INSTALLED_VERSIONS}" == "${EXPECTED_VERSIONS}" ]
