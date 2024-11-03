@@ -9,8 +9,6 @@ inputs:
     required: true
   caching-auth-token:
     description: Token to use when configuring vpckg binary caching
-  msvc-component-version:
-    description: Version of the VS MSVC component to install if running on Windows
   overlay-ports-directory:
     description: Path containing overlay ports
   vcpkg-platform-toolset-version:
@@ -64,25 +62,6 @@ inputs:
     description: Name of the staging directory under vcpkg-staging-directory-root
     required: true
     default: vcpkg-staging-${{ github.run_id }}-${{ github.run_attempt }}
-outputs:
-  baseline:
-    description: The vcpkg baseline used for the install
-    value: ${{ steps.collect-info.outputs.baseline }}
-  baseline-short:
-    description: The short version of the vcpkg baseline used for the install
-    value: ${{ steps.collect-info.outputs.baseline-short }}
-  compiler-id:
-    description: Name of the CXX compiler used for the install
-    value: ${{ steps.collect-info.outputs.compiler-id }}
-  compiler-version:
-    description: Version number of the CXX compiler used for the install
-    value: ${{ steps.collect-info.outputs.compiler-version }}
-  toolset-version:
-    description: Version number of the CXX compiler toolset used for the install
-    value: ${{ steps.collect-info.outputs.toolset-version }}
-  installed-versions:
-    description: List of installed package names and versions
-    value: ${{ steps.collect-info.outputs.installed-versions }}
 runs:
   using: "composite"
   steps:
@@ -103,7 +82,6 @@ runs:
         echo "triplets=${INSTALL}${SEP}triplets" >> "${GITHUB_OUTPUT}"
         echo "overlay-ports=${STAGING}${SEP}overlay-ports" >> "${GITHUB_OUTPUT}"
         echo "overlay-triplets=${STAGING}${SEP}overlay-triplets" >> "${GITHUB_OUTPUT}"
-        echo 'msvc-toolsets=${{ inputs.vs-install-directory }}\VC\Tools\MSVC' >> "${GITHUB_OUTPUT}"
     - name: Checkout vcpkg
       # Not using actions/checkout due to https://github.com/actions/checkout/issues/1812
       # If switching to that action remember to use fetch-depth
@@ -138,32 +116,6 @@ runs:
         if [[ -n '${{ inputs.vcpkg-platform-toolset-version }}' ]]; then
           echo 'set(VCPKG_PLATFORM_TOOLSET_VERSION ${{ inputs.vcpkg-platform-toolset-version }})' >> "${TRIPLET_DEST}"
         fi
-    - name: "[MSVC] Cache VS components"
-      uses: actions/cache@v4
-      if: ${{ runner.os == 'Windows' && inputs.msvc-component-version && inputs.vcpkg-platform-toolset-version }}
-      with:
-        path: ${{ steps.dirs.outputs.msvc-toolsets }}\\${{ inputs.vcpkg-platform-toolset-version }}
-        key: msvc-${{ inputs.vcpkg-platform-toolset-version }}
-    - name: "[MSVC] Install VS components"
-      id: vs-install
-      if: ${{ runner.os == 'Windows' && inputs.msvc-component-version }}
-      shell: bash
-      run: |
-        if [ -n '${{ inputs.vcpkg-platform-toolset-version }}' ]; then
-          if [ -d '${{ steps.dirs.outputs.msvc-toolsets }}\${{ inputs.vcpkg-platform-toolset-version }}' ]; then
-            echo "MSVC ${{ inputs.vcpkg-platform-toolset-version }} is already installed"
-            exit 0
-          fi
-        fi
-        '${{ inputs.vs-installer-path }}' modify --installPath '${{ inputs.vs-install-directory }}' --quiet --norestart --nocache \
-        --add Microsoft.VisualStudio.Component.VC.${{ inputs.msvc-component-version }}.x86.x64
-    - name: List available toolsets
-      shell: bash
-      run: |
-        echo "Available toolsets are:"
-        if [ '${{ runner.os }}' = 'Windows' ]; then
-          ls -1 '${{ steps.dirs.outputs.msvc-toolsets }}'
-        fi
     - name: Run vcpkg
       id: install
       run: "'${{ steps.dirs.outputs.exe }}' install --triplet '${{ inputs.triplet }}'"
@@ -175,65 +127,70 @@ runs:
         VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         VCPKG_OVERLAY_PORTS: ${{ steps.dirs.outputs.overlay-ports }}
         VCPKG_OVERLAY_TRIPLETS: ${{ steps.dirs.outputs.overlay-triplets }}
-    - name: "[On failure][MSVC] Upload VS installer logs"
-      # These were previously cat'd to STDOUT with an &&/|| but they're so verbose that it made viewing anything else difficult
-      uses: actions/upload-artifact@v4
-      if: ${{ failure() && steps.vs-install.outcome == 'success' || steps.vs-install.outcome == 'failure' }}
-      with:
-        name: ${{ inputs.log-artifact-prefix }}-${{ inputs.triplet }}-vs-install-logs
-        path: ${{ runner.temp }}\\dd_installer_*.log
     - name: "[On failure] Upload vcpkg logs"
       uses: actions/upload-artifact@v4
       if: ${{ failure() && steps.install.outcome == 'failure' }}
       with:
         name: ${{ inputs.log-artifact-prefix }}-${{ inputs.triplet }}
         path: ${{ steps.dirs.outputs.install }}/buildtrees/*/*.log
-    - name: Collect information on installed versions
-      # Note that we 'cd' to the directory rather than using 'working-directory' the runner seems to fail
-      # To launch bash at a path which contains a mix of Unix and DOS separators
-      id: collect-info
+    - name: Determine the baseline
+      id: baseline
       shell: bash
-      working-directory: ${{ steps.dirs.outputs.staging }}
       run: |
         BASELINE="$(mktemp)"
         SHORT_BASELINE="$(mktemp)"
         jq --exit-status --raw-output '."builtin-baseline"' '${{ steps.dirs.outputs.manifest }}' >> "${BASELINE}" \
           || git -C '${{ steps.dirs.outputs.install }}' rev-parse HEAD >> "${BASELINE}"
         git -C '${{ steps.dirs.outputs.install }}' rev-parse --short "$(cat ${BASELINE})" >> "${SHORT_BASELINE}"
-        echo "baseline=$(cat $BASELINE)" >> "${GITHUB_OUTPUT}"
-        echo "baseline-short=$(cat $SHORT_BASELINE)" >> "${GITHUB_OUTPUT}"
+        echo "long=$(cat $BASELINE)" >> "${GITHUB_OUTPUT}"
+        echo "short=$(cat $SHORT_BASELINE)" >> "${GITHUB_OUTPUT}"
         rm -f "${BASELINE}" "${SHORT_BASELINE}"
-
+    - name: Determine compiler information
+      id: compiler
+      shell: bash
+      run: |
         COMPILER_ID="$(mktemp)"
         COMPILER_VERSION="$(mktemp)"
         COMPILER_LOG='${{ steps.dirs.outputs.install }}/buildtrees/detect_compiler/stdout-${{ inputs.triplet }}.log'
         sed -nE 's/^#COMPILER_CXX_ID#(.*)/\1/p' "${COMPILER_LOG}" >> "${COMPILER_ID}"
         sed -nE 's/^#COMPILER_CXX_VERSION#(.*)/\1/p' "${COMPILER_LOG}" >> "${COMPILER_VERSION}"
-        echo "compiler-id=$(cat $COMPILER_ID)" >> "${GITHUB_OUTPUT}"
-        echo "compiler-version=$(cat $COMPILER_VERSION)" >> "${GITHUB_OUTPUT}"
-
+        echo "id=$(cat $COMPILER_ID)" >> "${GITHUB_OUTPUT}"
+        echo "version=$(cat $COMPILER_VERSION)" >> "${GITHUB_OUTPUT}"
+        
         if [ '${{ runner.os }}' = 'Windows' ]; then
           TOOLSET_VERSION="$(mktemp)"
           sed -nE 's|^#COMPILER_CXX_PATH#.*/MSVC/([^/]*).*|\1|p' "${COMPILER_LOG}" >> "${TOOLSET_VERSION}"
-          echo "toolset-version=$(cat $TOOLSET_VERSION)" >> "${GITHUB_OUTPUT}"
+          echo "toolset=$(cat $TOOLSET_VERSION)" >> "${GITHUB_OUTPUT}"
           rm -f "${TOOLSET_VERSION}"
         else
-          echo "toolset-version=$(cat $COMPILER_VERSION)" >> "${GITHUB_OUTPUT}"
+          echo "toolset=$(cat $COMPILER_VERSION)" >> "${GITHUB_OUTPUT}"
         fi
-
         rm -f "${COMPILER_ID}" "${COMPILER_VERSION}"
-
-        VERSIONS="$(mktemp)"
-        VERSIONS_EOF="$(openssl rand -base64 16)"
-        '${{ steps.dirs.outputs.exe }}' list | grep -v '^vcpkg-' | grep -v '\[' | perl -pe 's/[:].*?\s//' | awk '{print $1 " " $2}' >> "${VERSIONS}"
-        { 
-          echo "installed-versions<<${VERSIONS_EOF}"
-          cat "${VERSIONS}" 
-          echo "${VERSIONS_EOF}"
-        } >> "${GITHUB_OUTPUT}"
-        rm -f "${VERSIONS}"
+    - name: Determine installed versions
+      id: versions
+      shell: bash
+      working-directory: ${{ steps.dirs.outputs.staging }}
+      run: |
+        '${{ steps.dirs.outputs.exe }}' list | grep -v '^vcpkg-' | grep -v '\[' \
+        | perl -pe 's/[:].*?\s//' | awk '{print $1 " " $2}' > vcpkg-installed-packages.txt   
+    - name: Write out build info
+      shell: bash
+      working-directory: ${{ steps.dirs.outputs.staging }}
+      run: |
+        JSON_EOF="$(openssl rand -base64 16)"
+        cat <<$JSON_EOF > vcpkg-build-info.json
+        {
+          "baseline_long": "${{ steps.baseline.outputs.long }}",
+          "baseline_short": "${{ steps.baseline.outputs.short }}",
+          "compiler_id": "${{ steps.compiler.outputs.id }}",
+          "compiler_version": "${{ steps.compiler.outputs.version }}",
+          "compiler_toolset": "${{ steps.compiler.outputs.toolset }}"
+        }
+        $JSON_EOF
     - name: Move installed packages
       shell: bash
       run: |
         mkdir -p '${{ inputs.output-directory }}'
         mv '${{ steps.dirs.outputs.staging }}/vcpkg_installed/${{ inputs.triplet }}'/* '${{ inputs.output-directory }}'
+        mv '${{ steps.dirs.outputs.staging }}/vcpkg-build-info.json' '${{ inputs.output-directory }}'
+        mv '${{ steps.dirs.outputs.staging }}/vcpkg-installed-packages.txt' '${{ inputs.output-directory }}'

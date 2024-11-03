@@ -17,7 +17,7 @@ Specifcally, this action was designed with the following goals in mind.
 - Operate outside the default Actions workspace. No installing to $PWD/vcpkg.
 - Allow setting a toolset version without creating an overlay triplet.
 - Upload buildtree logs as artifacts if there's an error.
-- Provide outputs with information on the build.
+- Provide an easy to parse file with information on the build.
 - Just YAML and a bit of bash.
 
 To that end there are a few caveats and intentional non-features.
@@ -26,6 +26,12 @@ To that end there are a few caveats and intentional non-features.
 - Only operates in manifest mode. No installing packages by name.
 - No default value for triplet. The naming scheme used by vspkg is strange (compare settings in `x64-windows` and `x64-linux`).
 - Not tested on MacOS runners at this stage. Might still work there?
+
+Possible future features include.
+
+- Test binary caching
+- Support for arbitrary overlay ports.
+  - Will add this if/when I need it.
 
 ## Usage
 
@@ -121,40 +127,28 @@ Once the installation has completed, the contents of the temporary directory's `
 - By daafult there will not be a `${{triplet}}` subdirectory under `${{output-directory}}`.
   - If vcpkg installed `boost` with `x64-windows` then after this action runs `${{output-directory}}/include/boost/` will exist as opposed to `${{output-directory}}/x64-windows/include/boost`.
 
-### Outputs
+### Build information
 
-The following outputs are available.
+Information on the build is saved to a pair of JSON files in the root of the output directory: `vcpkg-build-info.json` and `vcpkg-installed-files.txt`. This information was previously provided via outputs. However, it turns out accessing those when they're run in a matrix build was a real pain. See [community discussion #17245](https://github.com/orgs/community/discussions/17245) and [actions/runner#2477](https://github.com/actions/runner/pull/2477).
 
-#### baseline and baseline-short
+The JSON file is formatted as follows.
 
-The baseline (git SHA) of vcpkg used in the install, e.g. `4f746bc66438fce2b900c3ba6094a483b871b045` and `4f746bc`.
+```json5
+{
+  // Short and long git SHAs used
+  // The SHA of HEAD if no baseline was specified
+  "baseline_long": "4f746bc66438fce2b900c3ba6094a483b871b045",
+  "baseline_short" "4f746bc",
+  // MSVC or GNU
+  "compiler_id": "MSVC",
+  // On GNU these will be the same
+  // On MSVC a the version is a mostly meaningless value
+  "compiler_version": "19.36.32546.0",
+  "compiler_toolset": "14.36.32532",
+}
+```
 
-If no baseline was set in the manfiest then it will refer to the current HEAD of the vcpkg repository.
-
-#### compiler-id
-
-The name of the compiler used, e.g. `MSVC`.
-
-On Windows this will generally be `MSVC`. On Linux, with gcc, it will be `GNU`.
-
-#### compiler-version
-
-The version of the compiler used, e.g. `19.36.32546.0`.
-
-On Windows with MSVC this will be [a compiler version](https://learn.microsoft.com/en-us/cpp/overview/compiler-versions) which is distinct from the
-version that you may have specified as `vcpkg-platform-toolset-version`. On Linux with GCC it will match `vcpkg-platform-toolset-version`.
-
-#### toolset-version
-
-The version of the compiler toolset used, e.g. `14.36.32532`.
-
-On Windows with MSVC this will be the same as the `vcpkg-platform-toolset-version` input if it was specified.
-
-On Linux with GCC this will be the same as `compiler-version`.
-
-#### installed-versions
-
-The package names and versions which were installed from the manifest including any dependencies, e.g:
+The txt file will be formatted like the example below. It is generated using [vcpkg list](https://learn.microsoft.com/en-us/vcpkg/commands/list) command with feature entries stripped out. The results should be lexically ordered.
 
 ```
 cppgraphqlgen 4.5.7#1
@@ -162,14 +156,4 @@ pegtl 3.2.8
 rapidjson 2023-07-17#1
 ```
 
-This is generated using the [vcpkg list](https://learn.microsoft.com/en-us/vcpkg/commands/list) command with feature entries stripped out. The results should be lexically ordered.
-
 The `#` part of the version number refers to which version of the vcpkg port configuration was used.
-
-## Todo and possible future features
-
-- Test binary caching
-- Support for arbitrary oberlay ports.
-- - Will add this if/when I need it.
-- Support for installing arbitrary toolchain versions on Linux.
-  - Will add this if/when I need it.
