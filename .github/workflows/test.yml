@@ -97,7 +97,7 @@ jobs:
       - name: Check installed-versions
         shell: bash
         run: |
-          INSTALLED_VERSIONS="$(cat test-output/vcpkg-installed-packages.txt | xargs < test-output/vcpkg-installed-packages.txt)"
+          INSTALLED_VERSIONS="$(xargs < test-output/vcpkg-installed-packages.txt)"
           EXPECTED_VERSIONS='boost-assert 1.86.0 boost-cmake 1.86.0 boost-config 1.86.0 boost-headers 1.86.0 boost-uninstall 1.86.0'
           echo "installed-versions: ${INSTALLED_VERSIONS}"
           echo "(expecting ${EXPECTED_VERSIONS})"
