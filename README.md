@@ -123,7 +123,7 @@ When the action runs, the file specified in `${{vcpkg-manifest}}` will be copied
 and then `vcpkg install` will be run against this temporary directory.
 Once the installation has completed, the contents of the temporary directory's `vcpkg_installed/${{triplet}}` will be moved to `${{output-directory}}`.
 
-- The `${{ utput-directory}}` will be created if it does not exist.
+- The `${{ output-directory}}` will be created if it does not exist.
 - By daafult there will not be a `${{triplet}}` subdirectory under `${{output-directory}}`.
   - If vcpkg installed `boost` with `x64-windows` then after this action runs `${{output-directory}}/include/boost/` will exist as opposed to `${{output-directory}}/x64-windows/include/boost`.
 
