@@ -7,8 +7,6 @@ inputs:
   output-directory:
     description: Directory into which installed packages should be moved (relative to workspace root)
     required: true
-  caching-auth-token:
-    description: Token to use when configuring vpckg binary caching
   overlay-ports-directory:
     description: Path containing overlay ports
   vcpkg-platform-toolset-version:
@@ -117,6 +115,8 @@ runs:
           echo 'set(VCPKG_PLATFORM_TOOLSET_VERSION ${{ inputs.vcpkg-platform-toolset-version }})' >> "${TRIPLET_DEST}"
         fi
     - name: Configure caching
+      # This may not have worked in the past - https://github.com/actions/runner/issues/3046
+      # But seems fine in testing
       uses: actions/github-script@v7
       with:
         script: |
