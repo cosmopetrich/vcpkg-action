@@ -27,10 +27,9 @@ To that end there are a few caveats and intentional non-features.
 - No default value for triplet. The naming scheme used by vspkg is strange (compare settings in `x64-windows` and `x64-linux`).
 - Not tested on MacOS runners at this stage. Might still work there?
 
-Possible future features include.
+Possible future improvements include.
 
-- Test binary caching
-- Support for arbitrary overlay ports.
+- Support for arbitrary overlay triplets.
   - Will add this if/when I need it.
 
 ## Usage
