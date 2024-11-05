@@ -41,6 +41,7 @@ jobs:
         id: vcpkg
         uses: ./
         with:
+          caching-auth-token: ${{ github.token }}
           output-directory: test-output
           overlay-ports-directory: ${{ matrix.overlay-ports-directoy }}
           triplet: ${{ matrix.triplet }}

@@ -46,16 +46,16 @@ Minimal usage requires only `output-directory` and `triplet`.
 
 This will use the `vcpkg.json` in the root of the Actions workspace and place the results into `packages/` in the same directory.
 
-To [enable caching](https://learn.microsoft.com/en-us/vcpkg/consume/binary-caching-github-actions-cache) you will need to set in `${{ caching-auth-token }}`.
+To [enable caching](https://learn.microsoft.com/en-us/vcpkg/consume/binary-caching-github-actions-cache) you will need to set `${{ caching-auth-token }}`.
 This is required due to to [actions/runner#3046](https://github.com/actions/runner/issues/3046).
 
 ```yaml
 - name: vcpkg
   uses: cosmopetrich/vcpkg-action@v1
   with:
+    caching-auth-token: ${{ github.token }}
     output-directory: packages
     triplet: x64-linux
-    caching-auth-token: ${{ github.token }}
 ```
 
 To use the `ACTIONS_RUNTIME_TOKEN` instead of the full `github.token` then you'll need to use an `actions/github-script` action to re-export it.
