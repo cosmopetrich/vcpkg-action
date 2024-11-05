@@ -116,13 +116,17 @@ runs:
         if [[ -n '${{ inputs.vcpkg-platform-toolset-version }}' ]]; then
           echo 'set(VCPKG_PLATFORM_TOOLSET_VERSION ${{ inputs.vcpkg-platform-toolset-version }})' >> "${TRIPLET_DEST}"
         fi
+    - name: Configure caching
+      uses: actions/github-script@v7
+      with:
+      script: |
+        core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
     - name: Run vcpkg
       id: install
       run: "'${{ steps.dirs.outputs.exe }}' install --triplet '${{ inputs.triplet }}'"
       working-directory: "${{ steps.dirs.outputs.staging }}"
       shell: bash
       env:
-        ACTIONS_CACHE_URL: ${{ env.ACTIONS_CACHE_URL }}
         ACTIONS_RUNTIME_TOKEN: ${{ inputs.caching-auth-token }}
         VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         VCPKG_OVERLAY_PORTS: ${{ steps.dirs.outputs.overlay-ports }}
