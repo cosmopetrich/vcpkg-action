@@ -121,13 +121,13 @@ runs:
       with:
         script: |
           core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
     - name: Run vcpkg
       id: install
       run: "'${{ steps.dirs.outputs.exe }}' install --triplet '${{ inputs.triplet }}'"
       working-directory: "${{ steps.dirs.outputs.staging }}"
       shell: bash
       env:
-        ACTIONS_RUNTIME_TOKEN: ${{ inputs.caching-auth-token }}
         VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         VCPKG_OVERLAY_PORTS: ${{ steps.dirs.outputs.overlay-ports }}
         VCPKG_OVERLAY_TRIPLETS: ${{ steps.dirs.outputs.overlay-triplets }}
