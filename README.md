@@ -95,6 +95,34 @@ You can provide a directory containing your [overlay ports](https://learn.micros
 Note that [overlay triplets](https://learn.microsoft.com/en-us/vcpkg/users/examples/overlay-triplets-linux-dynamic)
 are not currently supported, aside from the `vcpkg-platform-toolset-version` feature described above.
 
+### Running vcpkg multiple times in the same job
+
+In some edge cases you may wish to run vcpkg multiple times in the same job.
+This should not generally be required since you can either specify multiple dependencies in the same vcpkg.json
+or run multiple install in parallel using a Github Actions matrix job.
+
+Should neither of those approaches be desirable for whatever reason you will need to ensure that each vcpkg
+step has a different `vcpkg-install-directory-name` and `vcpkg-staging-directory-name`.
+
+```
+- name: vcpkg-1
+  uses: cosmopetrich/vcpkg-action@v1
+  with:
+    output-directory: packages
+    triplet: x64-linux
+    vcpkg-mangiest-file: vcpkg-1.json
+- name: vcpkg-2
+  uses: cosmopetrich/vcpkg-action@v1
+  with:
+    output-directory: packages
+    triplet: x64-linux
+    vcpkg-mangiest-file: vcpkg-2.json
+    vcpkg-install-directory-name: vcpkg-install-2
+    vcpkg-staging-directory-name: vcpkg-staging-2
+```
+
+Take a look near the top of the [action.yml](action.yml) to see how the default name is chosen.
+
 ## Details
 
 ### Behaviour of output-directory and vcpkg-manifest
