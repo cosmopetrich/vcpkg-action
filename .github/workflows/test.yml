@@ -25,13 +25,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        test: [linux-generic, windows-generic, toolset]
         include:
-          - os: ubuntu-22.04
+          - test: linux-generic
+            os: ubuntu-22.04
             triplet: x64-linux
-          - os: windows-2022
+          - test: windows-generic
+            os: windows-2022
             triplet: x64-windows
           # The version below is pre-installed in windows-2022 as of 2024-11
-          - vcpkg-platform-toolset-version: "14.41.34120"
+          - test: toolset
+            vcpkg-platform-toolset-version: "14.41.34120"
             os: windows-2022
             triplet: x64-windows-static
     steps:

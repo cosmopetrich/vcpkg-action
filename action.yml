@@ -95,8 +95,8 @@ runs:
         mkdir -p '${{ steps.dirs.outputs.staging }}'
         mkdir -p '${{ steps.dirs.outputs.overlay-triplets }}'
         cp '${{ inputs.vcpkg-manifest }}' '${{ steps.dirs.outputs.manifest }}'
-        if [[ -n '${{ inputs.overlay-ports }}' ]]; then
-          ln -s '${{ inputs.overlay-ports }}' '${{ steps.dirs.outputs.overlay-ports }}'
+        if [[ -n '${{ inputs.overlay-ports-directory }}' ]]; then
+          ln -s '${{ inputs.overlay-ports-directory }}' '${{ steps.dirs.outputs.overlay-ports }}'
         else
           mkdir -p '${{ steps.dirs.outputs.overlay-ports }}' 
         fi
