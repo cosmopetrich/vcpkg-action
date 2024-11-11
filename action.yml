@@ -90,13 +90,15 @@ runs:
       run: ./bootstrap-vcpkg.sh -disableMetrics
       working-directory: ${{ steps.dirs.outputs.install }}
     - name: Set up the staging directory
+      # This previously used a symlink but vcpkg doesn't seem to follow those
+      # Copying it isn't efficient but saves us trying to construct platform-independent absolute paths
       shell: bash
       run: |
         mkdir -p '${{ steps.dirs.outputs.staging }}'
         mkdir -p '${{ steps.dirs.outputs.overlay-triplets }}'
         cp '${{ inputs.vcpkg-manifest }}' '${{ steps.dirs.outputs.manifest }}'
         if [[ -n '${{ inputs.overlay-ports-directory }}' ]]; then
-          ln -s '${{ inputs.overlay-ports-directory }}' '${{ steps.dirs.outputs.overlay-ports }}'
+          cp -r '${{ inputs.overlay-ports-directory }}' '${{ steps.dirs.outputs.overlay-ports }}'
         else
           mkdir -p '${{ steps.dirs.outputs.overlay-ports }}' 
         fi
