@@ -1,0 +1,202 @@
+name: vcpkg
+description: Install packages from a vcpkg manifest
+inputs:
+  triplet:
+    description: Triplet to use when installing packages
+    required: true
+  output-directory:
+    description: Directory into which installed packages should be moved (relative to workspace root)
+    required: true
+  overlay-ports-directory:
+    description: Path containing overlay ports
+  vcpkg-platform-toolset-version:
+    description: Specific version of platform toolset (GCC, MSVC) to use in compilation
+  vcpkg-manifest:
+    description: Location of vcpkg.json manifest (relative to workspace root)
+    required: true
+    default: "${{ github.workspace }}/vcpkg.json"
+  #
+  # Modifying any of the inputs below this point should not ordinarily be needed
+  #
+  log-artifact-prefix:
+    # May be needed if running a matrix with multiple vcpkg steps that use the same triplet
+    # We can't generate a fully unique ID ourselves due to https://github.com/orgs/community/discussions/8945
+    description: Prefix to use for artifact name of vcpkg logs
+    required: true
+    default: vcpkg-logs-
+  vs-installer-path:
+    description: Absolute path of the Visual Studio installer
+    required: true
+    default: "C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vs_installer.exe"
+  vs-install-directory:
+    description: Absolute path of Visual Studio installation (*must* use backslashes)
+    required: true
+    default: "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise"
+  vcpkg-fetch-depth:
+    description: Git fetch depth to use when obtaining vcpkg
+    required: true
+    default: 0
+  vcpkg-repository:
+    description: Git repository to use when obtaining vcpkg
+    required: true
+    default: microsoft/vcpkg
+  # These directory names are split up like this because the shell doesn't seem to handle a mix of / and \
+  # in a single path very well, and on Windows the value of runner.temp will contain backslashes.
+  # Paths passed through to commands (e.g. to 'git clone') are fine.
+  # Weirdly, my local "git bash" on Windows handles doesn't have this problem.
+  vcpkg-install-directory-root:
+    description: Path under which to create vcpkg-install-directory-name
+    required: true
+    default: ${{ runner.temp }}
+  vcpkg-install-directory-name:
+    description: Name of install directory to create under vcpkg-install-directory-root
+    required: true
+    default: vcpkg-install-${{ github.run_id }}-${{ github.run_attempt }}
+  vcpkg-staging-directory-root:
+    description: Path under which to create vcpkg-staging-directory-name
+    required: true
+    default: ${{ runner.temp }}
+  vcpkg-staging-directory-name:
+    description: Name of the staging directory under vcpkg-staging-directory-root
+    required: true
+    default: vcpkg-staging-${{ github.run_id }}-${{ github.run_attempt }}
+runs:
+  using: "composite"
+  steps:
+    - name: Store directory names
+      # Needed because there's no top-level 'env' in composite actions
+      # https://github.com/orgs/community/discussions/51280
+      # Some of these, like 'manifest' are for consistency/convenience only
+      shell: bash
+      id: dirs
+      run: |
+        SEP='${{ runner.os == 'Windows' && '\' || '/' }}'
+        INSTALL="${{ inputs.vcpkg-install-directory-root }}${SEP}${{ inputs.vcpkg-install-directory-name }}"
+        STAGING="${{ inputs.vcpkg-staging-directory-root }}${SEP}${{ inputs.vcpkg-staging-directory-name }}"
+        echo "install=${INSTALL}" >> "${GITHUB_OUTPUT}"
+        echo "staging=${STAGING}" >> "${GITHUB_OUTPUT}"
+        echo "exe=${INSTALL}${SEP}vcpkg" >> "${GITHUB_OUTPUT}"
+        echo "manifest=${STAGING}${SEP}vcpkg.json" >> "${GITHUB_OUTPUT}"
+        echo "triplets=${INSTALL}${SEP}triplets" >> "${GITHUB_OUTPUT}"
+        echo "overlay-ports=${STAGING}${SEP}overlay-ports" >> "${GITHUB_OUTPUT}"
+        echo "overlay-triplets=${STAGING}${SEP}overlay-triplets" >> "${GITHUB_OUTPUT}"
+    - name: Checkout vcpkg
+      # Not using actions/checkout due to https://github.com/actions/checkout/issues/1812
+      # If switching to that action remember to use fetch-depth
+      shell: bash
+      run: git clone --quiet 'https://github.com/${{ inputs.vcpkg-repository }}.git' '${{ steps.dirs.outputs.install }}'
+    - name: Bootstrap vcpkg
+      shell: bash
+      run: ./bootstrap-vcpkg.sh -disableMetrics
+      working-directory: ${{ steps.dirs.outputs.install }}
+    - name: Set up the staging directory
+      # This previously used a symlink but vcpkg doesn't seem to follow those
+      # Copying it isn't efficient but saves us trying to construct platform-independent absolute paths
+      shell: bash
+      run: |
+        mkdir -p '${{ steps.dirs.outputs.staging }}'
+        mkdir -p '${{ steps.dirs.outputs.overlay-triplets }}'
+        cp '${{ inputs.vcpkg-manifest }}' '${{ steps.dirs.outputs.manifest }}'
+        if [[ -n '${{ inputs.overlay-ports-directory }}' ]]; then
+          cp -r '${{ inputs.overlay-ports-directory }}' '${{ steps.dirs.outputs.overlay-ports }}'
+        else
+          mkdir -p '${{ steps.dirs.outputs.overlay-ports }}' 
+        fi
+    - name: Find the target triplet
+      shell: bash
+      run: |
+        TRIPLET_SRC="$(mktemp)"
+        find '${{ steps.dirs.outputs.triplets }}' -name '${{ inputs.triplet }}.cmake' >> "${TRIPLET_SRC}"
+        if [ ! -s "${TRIPLET_SRC}" ]; then
+          echo 'No triplet named "${{ inputs.triplet }}" could be found' >&2
+          exit 1
+        fi
+        TRIPLET_DEST='${{ steps.dirs.outputs.overlay-triplets }}/${{ inputs.triplet }}.cmake'
+        cp "$(cat $TRIPLET_SRC)" "${TRIPLET_DEST}"
+        if [[ -n '${{ inputs.vcpkg-platform-toolset-version }}' ]]; then
+          echo 'set(VCPKG_PLATFORM_TOOLSET_VERSION ${{ inputs.vcpkg-platform-toolset-version }})' >> "${TRIPLET_DEST}"
+        fi
+    - name: Configure caching
+      # This may not have worked in the past - https://github.com/actions/runner/issues/3046
+      # But seems fine in testing
+      uses: actions/github-script@v7
+      with:
+        script: |
+          core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+          core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+    - name: Run vcpkg
+      id: install
+      run: "'${{ steps.dirs.outputs.exe }}' install --triplet '${{ inputs.triplet }}'"
+      working-directory: "${{ steps.dirs.outputs.staging }}"
+      shell: bash
+      env:
+        VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+        VCPKG_OVERLAY_PORTS: ${{ steps.dirs.outputs.overlay-ports }}
+        VCPKG_OVERLAY_TRIPLETS: ${{ steps.dirs.outputs.overlay-triplets }}
+    - name: "[On failure] Upload vcpkg logs"
+      uses: actions/upload-artifact@v4
+      if: ${{ failure() && steps.install.outcome == 'failure' }}
+      with:
+        name: ${{ inputs.log-artifact-prefix }}-${{ inputs.triplet }}
+        path: ${{ steps.dirs.outputs.install }}/buildtrees/*/*.log
+    - name: Determine the baseline
+      id: baseline
+      shell: bash
+      run: |
+        BASELINE="$(mktemp)"
+        SHORT_BASELINE="$(mktemp)"
+        jq --exit-status --raw-output '."builtin-baseline"' '${{ steps.dirs.outputs.manifest }}' >> "${BASELINE}" \
+          || git -C '${{ steps.dirs.outputs.install }}' rev-parse HEAD >> "${BASELINE}"
+        git -C '${{ steps.dirs.outputs.install }}' rev-parse --short "$(cat ${BASELINE})" >> "${SHORT_BASELINE}"
+        echo "long=$(cat $BASELINE)" >> "${GITHUB_OUTPUT}"
+        echo "short=$(cat $SHORT_BASELINE)" >> "${GITHUB_OUTPUT}"
+        rm -f "${BASELINE}" "${SHORT_BASELINE}"
+    - name: Determine compiler information
+      id: compiler
+      shell: bash
+      run: |
+        COMPILER_ID="$(mktemp)"
+        COMPILER_VERSION="$(mktemp)"
+        COMPILER_LOG='${{ steps.dirs.outputs.install }}/buildtrees/detect_compiler/stdout-${{ inputs.triplet }}.log'
+        sed -nE 's/^#COMPILER_CXX_ID#(.*)/\1/p' "${COMPILER_LOG}" >> "${COMPILER_ID}"
+        sed -nE 's/^#COMPILER_CXX_VERSION#(.*)/\1/p' "${COMPILER_LOG}" >> "${COMPILER_VERSION}"
+        echo "id=$(cat $COMPILER_ID)" >> "${GITHUB_OUTPUT}"
+        echo "version=$(cat $COMPILER_VERSION)" >> "${GITHUB_OUTPUT}"
+        
+        if [ '${{ runner.os }}' = 'Windows' ]; then
+          TOOLSET_VERSION="$(mktemp)"
+          sed -nE 's|^#COMPILER_CXX_PATH#.*/MSVC/([^/]*).*|\1|p' "${COMPILER_LOG}" >> "${TOOLSET_VERSION}"
+          echo "toolset=$(cat $TOOLSET_VERSION)" >> "${GITHUB_OUTPUT}"
+          rm -f "${TOOLSET_VERSION}"
+        else
+          echo "toolset=$(cat $COMPILER_VERSION)" >> "${GITHUB_OUTPUT}"
+        fi
+        rm -f "${COMPILER_ID}" "${COMPILER_VERSION}"
+    - name: Determine installed versions
+      id: versions
+      shell: bash
+      working-directory: ${{ steps.dirs.outputs.staging }}
+      run: |
+        '${{ steps.dirs.outputs.exe }}' list | grep -v '^vcpkg-' | grep -v '\[' \
+        | perl -pe 's/[:].*?\s//' | awk '{print $1 " " $2}' > vcpkg-installed-packages.txt   
+    - name: Write out build info
+      shell: bash
+      working-directory: ${{ steps.dirs.outputs.staging }}
+      run: |
+        JSON_EOF="$(openssl rand -base64 16)"
+        cat <<$JSON_EOF > vcpkg-build-info.json
+        {
+          "baseline_long": "${{ steps.baseline.outputs.long }}",
+          "baseline_short": "${{ steps.baseline.outputs.short }}",
+          "compiler_id": "${{ steps.compiler.outputs.id }}",
+          "compiler_version": "${{ steps.compiler.outputs.version }}",
+          "compiler_toolset": "${{ steps.compiler.outputs.toolset }}"
+        }
+        $JSON_EOF
+    - name: Move installed packages
+      shell: bash
+      run: |
+        mkdir -p '${{ inputs.output-directory }}'
+        mv '${{ steps.dirs.outputs.staging }}/vcpkg_installed/${{ inputs.triplet }}'/* '${{ inputs.output-directory }}'
+        mv '${{ steps.dirs.outputs.staging }}/vcpkg-build-info.json' '${{ inputs.output-directory }}'
+        mv '${{ steps.dirs.outputs.staging }}/vcpkg-installed-packages.txt' '${{ inputs.output-directory }}'

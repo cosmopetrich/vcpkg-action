@@ -1,0 +1,108 @@
+name: Tests
+on:
+  pull_request:
+    paths-ignore:
+      - LICENSE
+      - "*.md"
+  push:
+    branches:
+      - "v*"
+    paths-ignore:
+      - LICENSE
+      - "*.md"
+  workflow_dispatch:
+
+concurrency:
+  # Cancel in-progress tests on a new push to the same branch/PR
+  # https://stackoverflow.com/questions/70928424/limit-github-action-workflow-concurrency-on-push-and-pull-request
+  group: ${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  generic:
+    name: Generic
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [linux-generic, windows-generic, toolset]
+        include:
+          - test: linux-generic
+            os: ubuntu-22.04
+            triplet: x64-linux
+          - test: windows-generic
+            os: windows-2022
+            triplet: x64-windows
+          # The version below is pre-installed in windows-2022 as of 2024-11
+          - test: toolset
+            vcpkg-platform-toolset-version: "14.41.34120"
+            os: windows-2022
+            triplet: x64-windows-static
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run action
+        id: vcpkg
+        uses: ./
+        with:
+          output-directory: test-output
+          overlay-ports-directory: ${{ matrix.overlay-ports-directoy }}
+          triplet: ${{ matrix.triplet }}
+          vcpkg-manifest: .test/vcpkg.json
+          vcpkg-platform-toolset-version: ${{ matrix.vcpkg-platform-toolset-version }}
+      - name: Ensure that installed packages are in the correct place
+        run: |
+          ls
+          echo "---"
+          ls test-output
+          echo "---"
+          ls test-output/include
+          echo "---"
+          ls test-output/include/boost
+      - name: Check baseline
+        shell: bash
+        run: |
+          baseline="$(jq -r '.baseline_long' test-output/vcpkg-build-info.json)"
+          echo "baseline-long: ${baseline}"
+          [ "${baseline}" = "bb1ca2757bca8f8e372a4deb35943828e3b0d155" ]
+      - name: Check baseline-short
+        shell: bash
+        run: |
+          baseline_long="$(jq -r '.baseline_long' test-output/vcpkg-build-info.json)"
+          baseline_short="$(jq -r '.baseline_short' test-output/vcpkg-build-info.json)"
+          echo "baseline-short: ${baseline_short}"
+          grep -qE '^[a-f0-9]{7,}' <<< "${baseline_short}"
+          echo "baseline-short format OK"
+          grep -qE "^${baseline_short}" <<< "${baseline_long}"
+      - name: Check compiler-id
+        shell: bash
+        run: |
+          compiler_id="$(jq -r '.compiler_id' test-output/vcpkg-build-info.json)"
+          echo "compiler-id: ${compiler_id}"
+          grep -qE '^(GNU|MSVC)$' <<< "${compiler_id}"
+      - name: Check compiler-version
+        shell: bash
+        run: |
+          compiler_version="$(jq -r '.compiler_version' test-output/vcpkg-build-info.json)"
+          echo "compiler-version: ${compiler_version}"
+          grep -qE '^[0-9.]+$' <<< "${compiler_version}"
+      - name: Check compiler-toolset
+        shell: bash
+        run: |
+          compiler_toolset="$(jq -r '.compiler_toolset' test-output/vcpkg-build-info.json)"
+          echo "compiler-toolset: ${compiler_toolset}"
+          if [ -n "${{ matrix.vcpkg-platform-toolset-version }}" ]; then
+            echo "(expecting ${{ matrix.vcpkg-platform-toolset-version }})"
+            [ "${compiler_toolset}" = "${{ matrix.vcpkg-platform-toolset-version }}" ] 
+          else
+            echo "(expecting any version number)"
+            grep -qE '^[0-9.]+$' <<< "${compiler_toolset}" 
+          fi
+      - name: Check installed-versions
+        shell: bash
+        run: |
+          INSTALLED_VERSIONS="$(xargs < test-output/vcpkg-installed-packages.txt)"
+          EXPECTED_VERSIONS='boost-assert 1.86.0 boost-cmake 1.86.0 boost-config 1.86.0 boost-headers 1.86.0 boost-uninstall 1.86.0'
+          echo "installed-versions: ${INSTALLED_VERSIONS}"
+          echo "(expecting ${EXPECTED_VERSIONS})"
+          [ "${INSTALLED_VERSIONS}" = "${EXPECTED_VERSIONS}" ]
